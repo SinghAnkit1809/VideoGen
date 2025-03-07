@@ -159,6 +159,16 @@ VOICE_OPTIONS = {
     "Guy (US Male)": "en-US-GuyNeural"
 }
 
+VIDEO_STYLES = {
+    "realistic": "Photorealistic, detailed imagery",
+    "comics": "Comic book style with bold outlines",
+    "anime": "Japanese animation style",
+    "watercolor": "Soft, artistic watercolor painting",
+    "synthwave": "synthwave aesthetic, neon colors, retro-futuristic, 80s style",
+    "minimalist": "minimalist style, clean lines, simple shapes, limited color palette",
+    "3d_render": "3D rendered scene, computer graphics, detailed textures, volumetric lighting"
+}
+
 # Social media icons and links
 social_icons = """
 <div class="social-icons">
@@ -221,6 +231,15 @@ duration = st.sidebar.select_slider(
     options=[30, 45, 60, 90, 120, 180],
     value=45
 )
+
+# Video style selection
+style_name = st.sidebar.selectbox(
+    "Video Style",
+    options=list(VIDEO_STYLES.keys()),
+    index=0,
+    help="Choose the visual style for your video"
+)
+selected_style = style_name
 
 # Voice selection
 voice_name = st.sidebar.selectbox(
@@ -289,7 +308,8 @@ async def generate_video():
         generator = VideoGenerator(
             aspect_ratio=aspect_ratio_value,
             duration=duration,
-            voice=selected_voice
+            voice=selected_voice,
+            style=selected_style  # Add this line
         )
         
         # Generate video and get bytes

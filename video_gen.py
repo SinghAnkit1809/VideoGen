@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 from tempfile import TemporaryDirectory, gettempdir
 
 class VideoGenerator:
-    def __init__(self, aspect_ratio="9:16", duration=45, voice=None):
+    def __init__(self, aspect_ratio="9:16", duration=45, voice=None, style="realistic"):
         self.model = "openai"
         # Set dimensions based on aspect ratio
         if aspect_ratio == "9:16":
@@ -30,14 +30,26 @@ class VideoGenerator:
             
         self.target_duration = duration
         self.max_segment_duration = 4
-        self.num_segments = math.ceil(self.target_duration / self.max_segment_duration)
+        # Calculate exact number of segments based on duration
+        self.num_segments = max(10, math.ceil(self.target_duration / self.max_segment_duration))
         self.speech_rate = "-10%"
         self.voice = voice  # Store selected voice
+        self.style = style  # Store selected video style
         
-        # No longer creating output directory since we're not persisting videos
+        # Define available video styles
+        self.video_styles = {
+            "realistic": "photorealistic, detailed, high quality",
+            "comics": "comic book style, vibrant colors, bold outlines, comic panels",
+            "anime": "anime style, Japanese animation, detailed characters, vibrant colors",
+            "watercolor": "watercolor painting style, soft edges, artistic, flowing colors",
+            "noir": "film noir style, high contrast, black and white, dramatic shadows",
+            "synthwave": "synthwave aesthetic, neon colors, retro-futuristic, 80s style",
+            "minimalist": "minimalist style, clean lines, simple shapes, limited color palette",
+            "3d_render": "3D rendered scene, computer graphics, detailed textures, volumetric lighting"
+        }
 
-    def download_image(self, prompt, seed, max_retries=3):
-        """Download image from pollinations.ai with proper error handling"""
+    def download_image(self, prompt, seed, max_retries=5):
+        """Download image from pollinations.ai with improved error handling"""
         encoded_prompt = requests.utils.quote(prompt)
         image_url = f"https://pollinations.ai/p/{encoded_prompt}?width={self.width}&height={self.height}&seed={seed}&model=flux&nologo=true"
         
@@ -49,7 +61,8 @@ class VideoGenerator:
             except Exception as e:
                 if attempt == max_retries - 1:
                     raise RuntimeError(f"Failed to download image after {max_retries} attempts: {str(e)}")
-                time.sleep(2)
+                # Exponential backoff
+                time.sleep(2 * (attempt + 1))
                 continue
 
     async def generate_video(self, topic, progress_callback=None):
@@ -66,24 +79,59 @@ class VideoGenerator:
                     await progress_callback("📝 Crafting your story...")
                 story, segments = self._generate_story(topic)
                 
+                # Ensure we have the exact number of segments
+                if len(segments) != self.num_segments:
+                    segments = self._adjust_segments(segments, self.num_segments)
+                
                 # Image generation
                 if progress_callback:
-                    await progress_callback("🎨 Creating visuals...")
+                    await progress_callback(f"🎨 Creating visuals in {self.style} style...")
                 image_prompts = self._create_image_prompts(story, segments)
-                images = []
                 
-                for i, prompt in enumerate(image_prompts):
-                    for attempt in range(3):
-                        try:
-                            seed = random.randint(1, 999999)
-                            image = self.download_image(prompt, seed)
-                            images.append(np.array(image))
-                            del image  # Free PIL image memory immediately
-                            break
-                        except Exception as e:
-                            if attempt == 2:
-                                raise RuntimeError(f"Failed to generate image {i+1}: {str(e)}")
-                            await asyncio.sleep(1)
+                # Ensure we have the exact number of prompts
+                if len(image_prompts) != len(segments):
+                    # Duplicate last prompt or truncate if needed
+                    if len(image_prompts) < len(segments):
+                        image_prompts.extend([image_prompts[-1]] * (len(segments) - len(image_prompts)))
+                    else:
+                        image_prompts = image_prompts[:len(segments)]
+                
+                images = []
+                # Create a semaphore to limit concurrent downloads
+                semaphore = asyncio.Semaphore(3)
+                
+                # Create tasks for all image downloads
+                async def download_with_semaphore(prompt, idx):
+                    async with semaphore:
+                        for attempt in range(3):
+                            try:
+                                seed = random.randint(1, 999999)
+                                # Add a small delay between requests to prevent rate limiting
+                                await asyncio.sleep(0.5)
+                                # Run download in a thread to not block
+                                image = await asyncio.to_thread(self.download_image, prompt, seed)
+                                return (idx, np.array(image))
+                            except Exception as e:
+                                if attempt == 2:
+                                    raise RuntimeError(f"Failed to generate image {idx+1}: {str(e)}")
+                                await asyncio.sleep(1)
+                
+                # Create tasks for all images
+                tasks = [download_with_semaphore(prompt, i) for i, prompt in enumerate(image_prompts)]
+                
+                # Wait for all tasks to complete
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Process results and handle any exceptions
+                images_dict = {}
+                for result in results:
+                    if isinstance(result, Exception):
+                        raise result
+                    idx, image = result
+                    images_dict[idx] = image
+                
+                # Sort images by index
+                images = [images_dict[i] for i in range(len(image_prompts))]
                 
                 # Audio generation
                 if progress_callback:
@@ -108,7 +156,67 @@ class VideoGenerator:
                 except:
                     pass
 
-    # The rest of the methods remain the same
+    def _adjust_segments(self, segments, target_count):
+        """Ensure we have exactly the requested number of segments"""
+        if len(segments) == target_count:
+            return segments
+        
+        if len(segments) < target_count:
+            # We need more segments - split the longest ones
+            while len(segments) < target_count:
+                # Find longest segment
+                longest_idx = max(range(len(segments)), key=lambda i: len(segments[i]))
+                long_segment = segments[longest_idx]
+                
+                # Try to split at sentence
+                split_point = long_segment.rfind('.', 0, len(long_segment)//2)
+                if split_point == -1 or split_point < 10:
+                    # If no sentence break, try comma
+                    split_point = long_segment.rfind(',', 0, len(long_segment)//2)
+                
+                if split_point == -1 or split_point < 10:
+                    # If no comma, try space near middle
+                    mid_point = len(long_segment)//2
+                    left_space = long_segment.rfind(' ', 0, mid_point)
+                    right_space = long_segment.find(' ', mid_point)
+                    
+                    if left_space != -1 and right_space != -1:
+                        # Choose closest to midpoint
+                        if mid_point - left_space < right_space - mid_point:
+                            split_point = left_space
+                        else:
+                            split_point = right_space
+                    elif left_space != -1:
+                        split_point = left_space
+                    elif right_space != -1:
+                        split_point = right_space
+                    else:
+                        # Worst case: just split at midpoint
+                        split_point = mid_point
+                
+                # Do the split
+                first_part = long_segment[:split_point].strip()
+                second_part = long_segment[split_point:].strip()
+                
+                # Add a period to first part if needed
+                if first_part and first_part[-1] not in '.!?':
+                    first_part += '.'
+                
+                segments[longest_idx] = first_part
+                segments.insert(longest_idx + 1, second_part)
+        else:
+            # We have too many segments - merge the shortest adjacent ones
+            while len(segments) > target_count:
+                lengths = [len(s) for s in segments]
+                # Find pair of adjacent segments with smallest combined length
+                min_combined_idx = min(range(len(segments)-1),
+                                     key=lambda i: lengths[i] + lengths[i+1])
+                
+                merged = segments[min_combined_idx] + " " + segments[min_combined_idx+1]
+                segments[min_combined_idx:min_combined_idx+2] = [merged]
+        
+        return segments
+
     def _generate_story(self, topic):
         """Generate story segments with proper pacing"""
         prompt = f"""Write a simple, engaging story about {topic} that can be narrated in exactly {self.target_duration} seconds. Follow these rules:
@@ -146,77 +254,47 @@ class VideoGenerator:
         # Clean and normalize text first
         text = text.strip()
         if not text:
-            return [], ""
+            return "No story generated.", []
             
         segments = []
         story = text
-        target_length = len(text) // self.num_segments
         
         # Split by sentences first
-        sentences = [s.strip() for s in text.split('.') if s.strip()]
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
+        
+        # Target number of sentences per segment
+        target_sentences = max(1, len(sentences) // self.num_segments)
+        
+        # Create initial segments
         current_segment = []
-        current_length = 0
+        current_count = 0
         
         for sentence in sentences:
-            sentence = sentence.strip() + "."  # Add back the period
-            if current_length + len(sentence) <= target_length or not current_segment:
-                current_segment.append(sentence)
-                current_length += len(sentence)
-            else:
+            current_segment.append(sentence)
+            current_count += 1
+            
+            if current_count >= target_sentences and len(segments) < self.num_segments - 1:
                 segments.append(" ".join(current_segment))
-                current_segment = [sentence]
-                current_length = len(sentence)
+                current_segment = []
+                current_count = 0
         
-        # Add any remaining segment
+        # Add the last segment
         if current_segment:
             segments.append(" ".join(current_segment))
         
-        # If we need more segments, split the longest ones
-        while len(segments) < self.num_segments and any(len(s) > target_length for s in segments):
-            # Find longest segment
-            longest_idx = max(range(len(segments)), key=lambda i: len(segments[i]))
-            long_segment = segments[longest_idx]
-            
-            # Split at the nearest sentence or space
-            split_point = long_segment.rfind('.', 0, len(long_segment)//2)
-            if split_point == -1:
-                split_point = long_segment.rfind(' ', 0, len(long_segment)//2)
-            
-            if split_point != -1:
-                segments[longest_idx:longest_idx+1] = [
-                    long_segment[:split_point].strip(),
-                    long_segment[split_point:].strip()
-                ]
-        
-        # Ensure we have exactly the number of segments needed
-        while len(segments) > self.num_segments:
-            # Merge shortest adjacent segments
-            lengths = [len(s) for s in segments]
-            min_combined_idx = min(range(len(segments)-1),
-                                 key=lambda i: lengths[i] + lengths[i+1])
-            segments[min_combined_idx:min_combined_idx+2] = [
-                segments[min_combined_idx] + " " + segments[min_combined_idx+1]
-            ]
-        
-        while len(segments) < self.num_segments:
-            # Split longest segment
-            max_idx = max(range(len(segments)), key=lambda i: len(segments[i]))
-            segment = segments[max_idx]
-            split_point = len(segment) // 2
-            split_point = segment.rfind(' ', 0, split_point)
-            if split_point == -1:
-                split_point = len(segment) // 2
-            
-            segments[max_idx:max_idx+1] = [
-                segment[:split_point].strip(),
-                segment[split_point:].strip()
-            ]
+        # Now make sure we have exactly the right number of segments
+        segments = self._adjust_segments(segments, self.num_segments)
         
         return story, segments
 
     def _create_image_prompts(self, story, segments):
-        """Generate consistent visual prompts"""
-        prompt = f"""COMPREHENSIVE VISUAL STORYTELLING GUIDANCE:
+        """Generate detailed visual prompts with style consideration"""
+        # Get the selected style description
+        style_desc = self.video_styles.get(self.style, self.video_styles["realistic"])
+        
+        prompt = f"""Help Me to Create a Prompt for a short Film, where in Each scene, we need to highlight main charcter.
+        Treat Each Scene as a Seprate prompt.
     
         1. STORY ANALYSIS:
         Read this story carefully: 
@@ -225,34 +303,35 @@ class VideoGenerator:
         2. CHARACTER IDENTIFICATION:
         - Identify ALL people mentioned in the story
         - For each person, list key visual attributes:
-            * Approximate age
-            * Distinctive physical features
-            * Typical clothing/accessories
+            * Gender and approximate age
+            * Distinctive physical features (hair color, eye color, height, build)
+            * Typical clothing/accessories (specific colors and styles)
             * Associated objects/tools/environment
+            * If the Character is Superhero, then mention them evrytime with there superhero name where required. Example:"Superman", "SpiderMan", "Thor" etc.
     
         3. SETTING & TIMELINE:
-        - Identify ALL locations in the story
+        - Identify ALL locations in the story with specific details
         - Note any time period indicators
         - Track visual progression through story
     
-        4. FOR EACH SEGMENT CREATE A PROMPT:
+        4. FOR EACH SEGMENT CREATE A DETAILED PROMPT:
         Analyze these story segments:
         {json.dumps(segments)}
         
         PROMPT CREATION RULES:
-        - MAINTAIN CHARACTER CONSISTENCY: Same person = identical visual features across segments
-        - USE DESCRIPTIVE TERMS: "Middle-aged entrepreneur with glasses" not "John" or "he"
-        - INCLUDE SETTING DETAILS: Time period, location, weather if relevant
-        - EMOTIONAL TONE: Match visual mood to story segment
-        - SPECIFY ACTION: What is happening in this exact moment
-        - ART STYLE: Consistent digital art style, cartoonish but detailed
-        - MAX 120 CHARACTERS per prompt
-        
+        - MAINTAIN CHARACTER CONSISTENCY: Same person must have identical visual features across all segments
+        - USE VERY DESCRIPTIVE TERMS: "Bearded middle-aged entrepreneur with round glasses and navy suit" not "John" or "he"
+        - INCLUDE DETAILED SETTING: "Rain-soaked city street with neon signs reflecting in puddles" not just "city"
+        - EMOTIONAL TONE: Match visual mood to story segment (joyful, tense, serene, dramatic)
+        - SPECIFY ACTION IN PROGRESS: What is happening in this exact moment
+        - MUST INCLUDE STYLE: "{style_desc}" at the end of each prompt
+        - MAX 150 CHARACTERS per prompt
+
         Example prompts:
-        1. "Young Marie Curie in 1890s Paris lab, examining glowing test tubes, determined expression, cartoon digital art"
-        2. "Same scientist measuring radiation with simple tools, dim laboratory, focused expression, cartoon digital art"
+        1. "Young blonde Marie Curie in 1890s Paris lab, examining glowing test tubes with determined expression, beakers in background, photorealistic, detailed"
+        2. "Young blonde Marie Curie blonde scientist Marie measuring radiation with copper instruments, dim Victorian laboratory, focused expression, photorealistic, detailed"
         
-        Return EXACTLY {len(segments)} prompts in a JSON array with key "prompts". Each prompt must be a single string.
+        Return EXACTLY {len(segments)} prompts in a JSON array with key "prompts". Each prompt must be a single string ending with "{style_desc}".
         """
         
         response = requests.post(
@@ -272,16 +351,17 @@ class VideoGenerator:
         try:
             result = json.loads(response.text)
             if "prompts" in result:
-                return [p[:120] for p in result["prompts"]]
+                return [p[:150] for p in result["prompts"]]
             else:
                 # Try to extract prompts directly
                 if isinstance(result, list):
-                    return [p[:120] for p in result]
+                    return [p[:150] for p in result]
                 else:
-                    return [p[:120] for p in list(result.values())]
+                    return [p[:150] for p in list(result.values())]
         except:
-            # Fallback option with basic prompts
-            return [f"{seg[:80].replace('.', ',')} cartoon digital art style, inspirational scene" for seg in segments]
+            # Fallback option with basic prompts that include style
+            style_desc = self.video_styles.get(self.style, self.video_styles["realistic"])
+            return [f"{seg[:80].replace('.', ',')} {style_desc}" for seg in segments]
 
     async def _generate_audio(self, segments, temp_path):
         # List of good voices to choose from
@@ -328,10 +408,18 @@ class VideoGenerator:
             audio_path, segment_durations = audio_path
             clips = []
             
+            # Make sure we have same number of images as segments
+            if len(images) < len(segments):
+                # Duplicate last image if needed
+                images.extend([images[-1]] * (len(segments) - len(images)))
+            elif len(images) > len(segments):
+                # Truncate images if too many
+                images = images[:len(segments)]
+                
             for image_array, segment, duration in zip(images, segments, segment_durations):
                 # Calculate words per second for this segment
                 words = segment.split()
-                words_per_second = len(words) / duration
+                words_per_second = len(words) / duration if duration > 0 else 1
                 
                 # Split text into chunks that match speaking rhythm
                 chunk_size = max(1, int(words_per_second * 1.5))
@@ -348,7 +436,7 @@ class VideoGenerator:
                     chunks.append(' '.join(current_chunk))
                 
                 # Create sub-clips for each text chunk
-                chunk_duration = duration / len(chunks)
+                chunk_duration = duration / len(chunks) if chunks else duration
                 for i, chunk in enumerate(chunks):
                     image_with_caption = self._add_captions(image_array, chunk)
                     sub_clip = ImageClip(image_with_caption).set_duration(chunk_duration)
