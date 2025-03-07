@@ -1,0 +1,7 @@
+requests
+edge_tts
+numpy
+Pillow
+moviepy==1.0.3
+streamlit
+nest_asyncio
