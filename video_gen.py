@@ -215,42 +215,51 @@ class VideoGenerator:
         return story, segments
 
     def _create_image_prompts(self, story, segments):
-        """Generate consistent visual prompts for comic-style superhero storytelling"""
-        prompt = f"""COMIC-STYLE SUPERHERO IMAGE PROMPT GENERATION:
-        STORY CONTEXT:
+        """Generate consistent visual prompts"""
+        prompt = f"""COMPREHENSIVE VISUAL STORYTELLING GUIDANCE:
+    
+        1. STORY ANALYSIS:
+        Read this story carefully: 
         {story}
-        GUIDELINES:
-        1. HERO IDENTIFICATION:
-        - Carefully identify ALL unique characters, ESPECIALLY the SUPERHERO
-        - Create a CONSISTENT visual description for EACH character
-        - PRIORITIZE superhero's distinctive features
-        2. IMAGE PROMPT RULES:
-        - COMIC BOOK ART STYLE: Bold lines, vibrant colors, dynamic composition
-        - ALWAYS include full character description when they appear
-        - MAINTAIN CHARACTER VISUAL CONSISTENCY across segments
-        - USE DESCRIPTIVE CHARACTER TERMS
-        - CAPTURE ACTION AND EMOTION in each segment
-        - MAX 180 characters per prompt
-        3. SPECIFIC COMIC-STYLE INSTRUCTIONS:
-        - Use terms like "comic book illustration", "graphic novel style"
-        - Emphasize dynamic poses, dramatic lighting
-        - Include character's heroic or emotional state
-        - Show character's full body or dramatic close-ups
-        TECHNICAL REQUIREMENTS:
-        - Generate {len(segments)} distinct image prompts
-        - Ensure visual storytelling progression
-        - No generic images - each prompt must advance the narrative
-        EXAMPLE FORMAT:
-        "Muscular superhero in red and blue costume leaping dramatically, comic book illustration with bold lines"
-        "Same hero battling villains in urban landscape, graphic novel dynamic style"
-        SEGMENTS TO VISUALIZE:
-        {json.dumps(segments)}"""
+    
+        2. CHARACTER IDENTIFICATION:
+        - Identify ALL people mentioned in the story
+        - For each person, list key visual attributes:
+            * Approximate age
+            * Distinctive physical features
+            * Typical clothing/accessories
+            * Associated objects/tools/environment
+    
+        3. SETTING & TIMELINE:
+        - Identify ALL locations in the story
+        - Note any time period indicators
+        - Track visual progression through story
+    
+        4. FOR EACH SEGMENT CREATE A PROMPT:
+        Analyze these story segments:
+        {json.dumps(segments)}
+        
+        PROMPT CREATION RULES:
+        - MAINTAIN CHARACTER CONSISTENCY: Same person = identical visual features across segments
+        - USE DESCRIPTIVE TERMS: "Middle-aged entrepreneur with glasses" not "John" or "he"
+        - INCLUDE SETTING DETAILS: Time period, location, weather if relevant
+        - EMOTIONAL TONE: Match visual mood to story segment
+        - SPECIFY ACTION: What is happening in this exact moment
+        - ART STYLE: Consistent digital art style, cartoonish but detailed
+        - MAX 120 CHARACTERS per prompt
+        
+        Example prompts:
+        1. "Young Marie Curie in 1890s Paris lab, examining glowing test tubes, determined expression, cartoon digital art"
+        2. "Same scientist measuring radiation with simple tools, dim laboratory, focused expression, cartoon digital art"
+        
+        Return EXACTLY {len(segments)} prompts in a JSON array with key "prompts". Each prompt must be a single string.
+        """
         
         response = requests.post(
             "https://text.pollinations.ai/",
             json={
                 "messages": [
-                    {"role": "system", "content": "Expert comic book visual designer who maintains character continuity and narrative flow"},
+                    {"role": "system", "content": "You are a visual consistency expert who creates cohesive image prompts that maintain character continuity and visual storytelling."},
                     {"role": "user", "content": prompt}
                 ],
                 "model": self.model,
@@ -261,19 +270,18 @@ class VideoGenerator:
         )
         
         try:
-            # Truncate prompts to 180 characters and ensure comic book style
-            prompts = json.loads(response.text)['prompts']
-            comic_prompts = [
-                (p[:180] + " comic book illustration" if "comic" not in p.lower() else p[:180])
-                for p in prompts
-            ]
-            return comic_prompts
+            result = json.loads(response.text)
+            if "prompts" in result:
+                return [p[:120] for p in result["prompts"]]
+            else:
+                # Try to extract prompts directly
+                if isinstance(result, list):
+                    return [p[:120] for p in result]
+                else:
+                    return [p[:120] for p in list(result.values())]
         except:
-            # Fallback with generic comic-style prompts
-            return [
-                f"{seg[:100]} comic book illustration, bold dynamic style" 
-                for seg in segments
-            ]
+            # Fallback option with basic prompts
+            return [f"{seg[:80].replace('.', ',')} cartoon digital art style, inspirational scene" for seg in segments]
 
     async def _generate_audio(self, segments, temp_path):
         # List of good voices to choose from
