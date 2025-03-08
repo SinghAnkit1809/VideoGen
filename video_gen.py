@@ -29,7 +29,8 @@ class VideoGenerator:
             self.is_vertical = False
             
         self.target_duration = duration
-        self.max_segment_duration = 6
+        # For longer videos, use longer segments to reduce transitions
+        self.max_segment_duration = min(6, duration / 8)
         # Calculate exact number of segments based on duration
         self.num_segments = max(10, math.ceil(self.target_duration / self.max_segment_duration))
         self.speech_rate = "-10%"
@@ -39,7 +40,7 @@ class VideoGenerator:
         # Define available video styles
         self.video_styles = {
             "realistic": "photorealistic, detailed, high quality",
-            "comics": "comic book style, vibrant colors, bold outlines, comic panels",
+            "comics": "comic book style, vibrant colors, bold outlines",
             "anime": "anime style, Japanese animation, detailed characters, vibrant colors",
             "watercolor": "watercolor painting style, soft edges, artistic, flowing colors",
             "noir": "film noir style, high contrast, black and white, dramatic shadows",
@@ -91,7 +92,7 @@ class VideoGenerator:
                 
                 # Ensure we have the exact number of prompts
                 if len(image_prompts) != len(segments):
-                    # Duplicate last prompt or truncate if needed
+                    # Adjust the number of prompts to match segments
                     if len(image_prompts) < len(segments):
                         image_prompts.extend([image_prompts[-1]] * (len(segments) - len(image_prompts)))
                     else:
@@ -220,25 +221,25 @@ class VideoGenerator:
 
     def _generate_story(self, topic):
         """Generate story segments with proper pacing"""
-        prompt = f"""Write a simple, engaging story about {topic} that can be narrated in exactly {self.target_duration} seconds. Follow these rules:
-        1. Use simple English (A2/B1 level) with short sentences
-        2. Include natural speaking pauses between ideas
-        3. Use concrete words over abstract concepts
-        4. Limit complex vocabulary (e.g. use 'make' instead of 'fabricate')
-        5. Structure with clear cause-effect relationships
-        6. Use everyday examples readers can relate to
-        seed = {random.randint(0,1000000)}
-        
-        Example good sentence: "When the rain didn't stop, Mia knew she had to move her garden to higher ground."
-        Example bad sentence: "The precipitation persisting, Mia was compelled to relocate her horticultural project elevationally."
-        
-        Make exactly {self.num_segments} natural segments with oral storytelling flow. Return ONLY the story."""
-        
+        # Simplified prompt focused on clear segmentation
+        target_word_count = int(self.target_duration / 60 * 150)  # ~150 words per minute
+        words_per_segment = target_word_count // self.num_segments
+
+        prompt = f"""Write a very concise story about {topic} that will be exactly {target_word_count} words total.
+
+        Rules:
+        1. Use simple, clear language with very short sentences
+        2. Create exactly {self.num_segments} segments of approximately {words_per_segment} words each
+        3. Each segment must be extremely brief - aim for 1-2 short sentences only
+        4. The entire story must be narrated in {self.target_duration} seconds, so be extremely concise
+
+        Return ONLY the story divided into exactly {self.num_segments} numbered segments."""
+                
         response = requests.post(
             "https://text.pollinations.ai/",
             json={
                 "messages": [
-                    {"role": "system", "content": "Expert storyteller"},
+                    {"role": "system", "content": "You are a storyteller who writes clear, visual stories with proper pacing."},
                     {"role": "user", "content": prompt}
                 ],
                 "model": self.model,
@@ -248,98 +249,59 @@ class VideoGenerator:
             timeout=60
         )
         response.raise_for_status()
-        return self._split_text(response.text.strip())
-
-    def _split_text(self, text):
-        """Split text into well-paced segments"""
-        # Clean and normalize text first
-        text = text.strip()
-        if not text:
-            return "No story generated.", []
-            
+        
+        # Process the response - extract numbered segments
+        text = response.text.strip()
+        
+        # Parse the numbered list format
         segments = []
-        story = text
+        full_story = text
         
-        # Split by sentences first
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        sentences = [s.strip() for s in sentences if s.strip()]
+        # Extract segments using regex for numbered format
+        pattern = r'^\d+\.?\s+(.*?)(?=\n\d+\.?\s+|$)'
+        matches = re.findall(pattern, text, re.MULTILINE | re.DOTALL)
         
-        # Target number of sentences per segment
-        target_sentences = max(1, len(sentences) // self.num_segments)
+        if matches:
+            segments = [match.strip() for match in matches]
+        else:
+            # Fallback: just split by newlines and clean up
+            segments = [line.strip() for line in text.split('\n') if line.strip()]
+            # Remove any numbering if present
+            segments = [re.sub(r'^\d+\.?\s+', '', segment) for segment in segments]
         
-        # Create initial segments
-        current_segment = []
-        current_count = 0
+        # Clean segments and ensure we have the right number
+        segments = [s for s in segments if s]  # Remove empty segments
         
-        for sentence in sentences:
-            current_segment.append(sentence)
-            current_count += 1
-            
-            if current_count >= target_sentences and len(segments) < self.num_segments - 1:
-                segments.append(" ".join(current_segment))
-                current_segment = []
-                current_count = 0
-        
-        # Add the last segment
-        if current_segment:
-            segments.append(" ".join(current_segment))
-        
-        # Now make sure we have exactly the right number of segments
-        segments = self._adjust_segments(segments, self.num_segments)
-        
-        return story, segments
+        return full_story, segments
 
     def _create_image_prompts(self, story, segments):
         """Generate detailed visual prompts with style consideration"""
         # Get the selected style description
         style_desc = self.video_styles.get(self.style, self.video_styles["realistic"])
         
-        prompt = f"""Help Me to Create a Prompt for a short Film, where in Each scene, we need to highlight main charcter.
-        Treat Each Scene as a Seprate prompt.
-    
-        1. STORY ANALYSIS:
-        Read this story carefully: 
-        {story}
-    
-        2. CHARACTER IDENTIFICATION:
-        - Identify ALL people mentioned in the story
-        - For each person, list key visual attributes:
-            * Gender and approximate age
-            * Distinctive physical features (hair color, eye color, height, build)
-            * Typical clothing/accessories (specific colors and styles)
-            * Associated objects/tools/environment
-            * If the Character is Superhero, then mention them evrytime with there superhero name where required. Example:"Superman", "SpiderMan", "Thor" etc.
-    
-        3. SETTING & TIMELINE:
-        - Identify ALL locations in the story with specific details
-        - Note any time period indicators
-        - Track visual progression through story
-    
-        4. FOR EACH SEGMENT CREATE A DETAILED PROMPT:
-        Analyze these story segments:
-        {json.dumps(segments)}
-        
-        PROMPT CREATION RULES:
-        - MAINTAIN CHARACTER CONSISTENCY: Same person must have identical visual features across all segments
-        - USE VERY DESCRIPTIVE TERMS: "Bearded middle-aged entrepreneur with round glasses and navy suit" not "John" or "he"
-        - INCLUDE DETAILED SETTING: "Rain-soaked city street with neon signs reflecting in puddles" not just "city"
-        - EMOTIONAL TONE: Match visual mood to story segment (joyful, tense, serene, dramatic)
-        - SPECIFY ACTION IN PROGRESS: What is happening in this exact moment
-        - MUST INCLUDE STYLE: "{style_desc}" at the end of each prompt
-        - MAX 150 CHARACTERS per prompt
+        # Simplified prompt that focuses on visual consistency
+        prompt = f"""Create image prompts for a {self.style} style video about: {story}
 
-        Example prompts:
-        1. "A god-like warrior with flowing blonde hair, glowing blue eyes, and a crackling thunder hammer clashes mid-air with a caped alien hero, his red eyes burning with solar fury. Lightning strikes as the hammer meets a devastating energy punch, sending shockwaves through the stormy sky. Below, a crumbling city with shattered skyscrapers and debris adds to the chaos. Rain pours, reflecting the flashes of power. Their capes billow in the wind, muscles tensed in an intense, cinematic showdown. Hyper-detailed, ultra-dramatic, dynamic lighting, epic comic book realism"
-        2. "A young boy with messy hair and glasses sits at a wooden study table, deeply focused on his textbooks and notes. A desk lamp casts a warm glow on his face, highlighting his determined expression. Scattered papers, an open laptop, and a cup of coffee surround him. The clock on the wall shows late-night hours, emphasizing his dedication. Outside the window, a quiet cityscape glows under the moonlight. The atmosphere is cozy yet intense, capturing the essence of hard work and concentration. Ultra-detailed, cinematic lighting, realistic textures, and a studious ambiance."
-        
-        Return EXACTLY {len(segments)} prompts in a JSON array with key "prompts". Each prompt must be a single string ending with "{style_desc}".
-        """
+For each segment below, create ONE visual prompt that:
+1. Describes exactly what should be visible in the scene
+2. Maintains consistent character appearance across all scenes
+3. Includes setting details
+4. Is under 150 characters
+5. Ends with "{style_desc}"
+
+SEGMENTS:
+{json.dumps(segments)}
+
+Example prompt format:
+"A young woman with long red hair in a blue dress stands on a rocky cliff overlooking a stormy ocean, wind blowing her hair, {style_desc}"
+
+Return a JSON array with key "prompts" containing exactly {len(segments)} prompts."""
         
         response = requests.post(
             "https://text.pollinations.ai/",
             json={
                 "messages": [
-                    {"role": "system", "content": "You are a visual consistency expert who creates cohesive image prompts that maintain character continuity and visual storytelling."},
+                    {"role": "system", "content": "You are a visual prompt expert who creates consistent, detailed image descriptions."},
                     {"role": "user", "content": prompt}
                 ],
                 "model": self.model,
@@ -353,18 +315,25 @@ class VideoGenerator:
             result = json.loads(response.text)
             if "prompts" in result:
                 return [p[:150] for p in result["prompts"]]
+            elif isinstance(result, list):
+                return [p[:150] for p in result]
+            elif isinstance(result, dict):
+                # Extract values from dictionary
+                return [p[:150] for p in list(result.values())]
             else:
-                # Try to extract prompts directly
-                if isinstance(result, list):
-                    return [p[:150] for p in result]
-                else:
-                    return [p[:150] for p in list(result.values())]
+                # Fallback with basic prompts
+                return self._fallback_image_prompts(segments)
         except:
-            # Fallback option with basic prompts that include style
-            style_desc = self.video_styles.get(self.style, self.video_styles["realistic"])
-            return [f"{seg[:80].replace('.', ',')} {style_desc}" for seg in segments]
+            # Fallback option if JSON parsing fails
+            return self._fallback_image_prompts(segments)
+
+    def _fallback_image_prompts(self, segments):
+        """Create simple fallback prompts if the API response fails"""
+        style_desc = self.video_styles.get(self.style, self.video_styles["realistic"])
+        return [f"{seg[:80].replace('.', ',')} {style_desc}" for seg in segments]
 
     async def _generate_audio(self, segments, temp_path):
+        """Generate and combine audio segments"""
         # List of good voices to choose from
         voice_options = [
             "en-US-ChristopherNeural",  # Male voice
@@ -377,7 +346,6 @@ class VideoGenerator:
         # Use selected voice or randomly choose one for consistency
         selected_voice = self.voice if self.voice else random.choice(voice_options)
         
-        """Generate and combine audio segments"""
         audio_files = []
         segment_durations = []
         
@@ -416,7 +384,8 @@ class VideoGenerator:
             elif len(images) > len(segments):
                 # Truncate images if too many
                 images = images[:len(segments)]
-                
+            
+            # Use segment durations to time the images
             for image_array, segment, duration in zip(images, segments, segment_durations):
                 # Calculate words per second for this segment
                 words = segment.split()
@@ -442,9 +411,12 @@ class VideoGenerator:
                     image_with_caption = self._add_captions(image_array, chunk)
                     sub_clip = ImageClip(image_with_caption).set_duration(chunk_duration)
                     clips.append(sub_clip)
+
             
             # Combine all clips
             final_clip = concatenate_videoclips(clips)
+            
+            # Set audio to the generated narration
             final_clip = final_clip.set_audio(AudioFileClip(str(audio_path)))
             
             # Create video file directly in temp_path
@@ -457,6 +429,7 @@ class VideoGenerator:
             # Create temp audio file path
             temp_audio = temp_path / "temp_audio.mp3"
             
+            # Write the video file with optimized settings
             final_clip.write_videofile(
                 str(output_path),
                 fps=15,
@@ -488,8 +461,9 @@ class VideoGenerator:
             try:
                 if 'final_clip' in locals():
                     final_clip.close()
-                for clip in clips:
-                    clip.close()
+                if 'clips' in locals():
+                    for clip in clips:
+                        clip.close()
             except:
                 pass
 
