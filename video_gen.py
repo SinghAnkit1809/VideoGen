@@ -29,7 +29,7 @@ class VideoGenerator:
             self.is_vertical = False
             
         self.target_duration = duration
-        self.max_segment_duration = 4
+        self.max_segment_duration = 6
         # Calculate exact number of segments based on duration
         self.num_segments = max(10, math.ceil(self.target_duration / self.max_segment_duration))
         self.speech_rate = "-10%"
@@ -51,7 +51,22 @@ class VideoGenerator:
     def download_image(self, prompt, seed, max_retries=5):
         """Download image from pollinations.ai with improved error handling"""
         encoded_prompt = requests.utils.quote(prompt)
-        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width={self.width}&height={self.height}&seed={seed}&model=flux&nologo=true"
+
+        # Define negative prompts for better image quality
+        negative_prompts = [
+            "blur", "blurry", "text", "watermark", "signature", "label",
+            "low quality", "worst quality", "bad anatomy", "deformed",
+            "poorly drawn", "extra limbs", "bad proportions", "distorted",
+            "out of frame", "duplicate", "disfigured", "pixelated",
+            "ugly", "tiling", "grain", "noise", "multiple faces",
+            "poorly rendered", "mutation", "mutated", "extra fingers",
+            "floating limbs", "disconnected limbs", "malformed hands"
+        ]
+        
+        # Encode negative prompts
+        negative_prompt_str = requests.utils.quote(", ".join(negative_prompts))
+        
+        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width={self.width}&height={self.height}&seed={seed}&model=flux&nologo=true&enhance=True&nofeed=True&safe=True&negative_prompt={negative_prompt_str}"
         
         for attempt in range(max_retries):
             try:
@@ -328,8 +343,8 @@ class VideoGenerator:
         - MAX 150 CHARACTERS per prompt
 
         Example prompts:
-        1. "Young blonde Marie Curie in 1890s Paris lab, examining glowing test tubes with determined expression, beakers in background, photorealistic, detailed"
-        2. "Young blonde Marie Curie blonde scientist Marie measuring radiation with copper instruments, dim Victorian laboratory, focused expression, photorealistic, detailed"
+        1. "A god-like warrior with flowing blonde hair, glowing blue eyes, and a crackling thunder hammer clashes mid-air with a caped alien hero, his red eyes burning with solar fury. Lightning strikes as the hammer meets a devastating energy punch, sending shockwaves through the stormy sky. Below, a crumbling city with shattered skyscrapers and debris adds to the chaos. Rain pours, reflecting the flashes of power. Their capes billow in the wind, muscles tensed in an intense, cinematic showdown. Hyper-detailed, ultra-dramatic, dynamic lighting, epic comic book realism"
+        2. "A young boy with messy hair and glasses sits at a wooden study table, deeply focused on his textbooks and notes. A desk lamp casts a warm glow on his face, highlighting his determined expression. Scattered papers, an open laptop, and a cup of coffee surround him. The clock on the wall shows late-night hours, emphasizing his dedication. Outside the window, a quiet cityscape glows under the moonlight. The atmosphere is cozy yet intense, capturing the essence of hard work and concentration. Ultra-detailed, cinematic lighting, realistic textures, and a studious ambiance."
         
         Return EXACTLY {len(segments)} prompts in a JSON array with key "prompts". Each prompt must be a single string ending with "{style_desc}".
         """
@@ -343,7 +358,7 @@ class VideoGenerator:
                 ],
                 "model": self.model,
                 "jsonMode": True,
-                "seed": random.randint(0, 1000000)
+                "seed": random.randint(0, 1000000),
             },
             timeout=60
         )
