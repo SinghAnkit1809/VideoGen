@@ -51,22 +51,8 @@ class VideoGenerator:
     def download_image(self, prompt, seed, max_retries=5):
         """Download image from pollinations.ai with improved error handling"""
         encoded_prompt = requests.utils.quote(prompt)
-
-        # Define negative prompts for better image quality
-        negative_prompts = [
-            "blur", "blurry", "text", "watermark", "signature", "label",
-            "low quality", "worst quality", "bad anatomy", "deformed",
-            "poorly drawn", "extra limbs", "bad proportions", "distorted",
-            "out of frame", "duplicate", "disfigured", "pixelated",
-            "ugly", "tiling", "grain", "noise", "multiple faces",
-            "poorly rendered", "mutation", "mutated", "extra fingers",
-            "floating limbs", "disconnected limbs", "malformed hands"
-        ]
         
-        # Encode negative prompts
-        negative_prompt_str = requests.utils.quote(", ".join(negative_prompts))
-        
-        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width={self.width}&height={self.height}&seed={seed}&model=flux&nologo=true&enhance=True&nofeed=True&safe=True&negative_prompt={negative_prompt_str}"
+        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width={self.width}&height={self.height}&seed={seed}&model=flux&nologo=true&enhance=True&nofeed=True&safe=True"
         
         for attempt in range(max_retries):
             try:
