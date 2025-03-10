@@ -42,6 +42,9 @@ class VideoGenerator:
             "realistic": "photorealistic, detailed, high quality",
             "comics": "comic book style, vibrant colors, bold outlines",
             "anime": "anime style, Japanese animation, detailed characters, vibrant colors",
+            "line_diagram": "simple line drawing style, rough yellow background, hand-drawn sketch aesthetic, minimal details",
+            "pixelart": "8-bit pixel art style, limited color palette, blocky shapes, retro gaming aesthetic",
+            "papercraft": "paper cutout collage style, layered paper elements, scissor-cut shapes, textured paper look",
             "watercolor": "watercolor painting style, soft edges, artistic, flowing colors",
             "noir": "film noir style, high contrast, black and white, dramatic shadows",
             "synthwave": "synthwave aesthetic, neon colors, retro-futuristic, 80s style",
@@ -232,6 +235,7 @@ class VideoGenerator:
         2. Create exactly {self.num_segments} segments of approximately {words_per_segment} words each
         3. Each segment must be extremely brief - aim for 1-2 short sentences only
         4. The entire story must be narrated in {self.target_duration} seconds, so be extremely concise
+        5. Start story with some Hook to grab attention.
 
         Return ONLY the story divided into exactly {self.num_segments} numbered segments."""
                 
