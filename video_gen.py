@@ -56,11 +56,11 @@ class VideoGenerator:
         """Download image from pollinations.ai with improved error handling"""
         encoded_prompt = requests.utils.quote(prompt)
         
-        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width={self.width}&height={self.height}&seed={seed}&model=flux&nologo=true&enhance=True&nofeed=True&safe=True"
+        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width={self.width}&height={self.height}&seed={seed}&model=flux-pro&nologo=true&enhance=True&nofeed=True&safe=True"
         
         for attempt in range(max_retries):
             try:
-                response = requests.get(image_url, timeout=30)
+                response = requests.get(image_url, timeout=60)
                 response.raise_for_status()
                 return Image.open(BytesIO(response.content))
             except Exception as e:
@@ -228,22 +228,22 @@ class VideoGenerator:
         target_word_count = int(self.target_duration / 60 * 150)  # ~150 words per minute
         words_per_segment = target_word_count // self.num_segments
 
-        prompt = f"""Write a very concise story about {topic} that will be exactly {target_word_count} words total.
+        prompt = f"""Write a very concise Script about {topic} that will be exactly {target_word_count} words total.
 
         Rules:
         1. Use simple, clear language with very short sentences
         2. Create exactly {self.num_segments} segments of approximately {words_per_segment} words each
         3. Each segment must be extremely brief - aim for 1-2 short sentences only
-        4. The entire story must be narrated in {self.target_duration} seconds, so be extremely concise
-        5. Start story with some Hook to grab attention.
+        4. The entire Script must be narrated in {self.target_duration} seconds, so be extremely concise
+        5. Start Script with some Hook to grab attention.
 
-        Return ONLY the story divided into exactly {self.num_segments} numbered segments."""
+        Return ONLY the Script divided into exactly {self.num_segments} numbered segments."""
                 
         response = requests.post(
             "https://text.pollinations.ai/",
             json={
                 "messages": [
-                    {"role": "system", "content": "You are a storyteller who writes clear, visual stories with proper pacing."},
+                    {"role": "system", "content": "You are a scriptwriter who writes clear, visual stories with proper pacing."},
                     {"role": "user", "content": prompt}
                 ],
                 "model": self.model,

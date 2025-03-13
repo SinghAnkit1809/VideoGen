@@ -156,7 +156,10 @@ VOICE_OPTIONS = {
     "Jenny (US Female)": "en-US-JennyNeural",
     "Ryan (UK Male)": "en-GB-RyanNeural",
     "Sonia (UK Female)": "en-GB-SoniaNeural",
-    "Guy (US Male)": "en-US-GuyNeural"
+    "Guy (US Male)": "en-US-GuyNeural",
+    "Eric (Deep US Male)": "en-US-EricNeural",
+    "Tony (Deep UK Male)": "en-GB-ThomasNeural",
+    "Prabhat (IN Male)": "en-IN-PrabhatNeural"
 }
 
 VIDEO_STYLES = {
